@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CICD_Pipeline for AWS Glue
+
+########################################################
+############### Parameters #############################
+########################################################
+Parameters:
+
+  Environment:
+    Type: String
+    Description: Environment Name for Deployment
+  ProjectName:
+    Description: Name of the Project
+    Type: String
+    Default: pennyworth
+  
+  BucketName:
+    Type: String
+    Description: Bucket name (without environment) where glue files are located
+    Default: pw-data-glue-jobs
+
+  TargetAWSAccount:
+    Description: AWS AccountNumber for target account
+    Type: Number
+
+  CodeCommitRepositoryName:
+    Type: String
+    Description: Name of the CodeCommit Repository CICD CodePipeline
+
+  CodeCommitBranchName:
+    Type: String
+    Description: CodeCommit Branch Name for CICD CodePipeline
+
+  CrossAccountS3BucketName:
+    Type: String
+    Description: Name of S3 Bucket for Artifacts in CICD Account 
+
+  CodePipelineServiceRole:
+    Type: String
+    Description: CodePipeline Role Arn
+  
+  JobScriptPath:
+    Type: String
+    Description: Location of job script directory in S3 (without leading '/' & excluding Bucket name)
+    Default: Brane/scripts/main
+
+  JobName:
+    Type: String
+    Description: Glue job name (without environment) to create
+    Default: Brane_Job
+
+  JobRoleName:
+    Type: String
+    Description: Name of IAM Role (without environment) that job uses
+    Default: aqeel-aws-glue
+
+  JobScriptTempPath:
+    Type: String
+    Description: Location of temporary job script directory in S3 bucket (without leading '/' & excluding Bucket name)
+    Default: "Brane/scripts/temp"
+  
+  JobLibraryPath:
+    Type: String
+    Description: Location of job library directory in S3 bucket (without leading '/' & excluding Bucket name)
+    Default: "Brane/scripts/main/modules"
+
+  S3KmsKeyId:
+    Type: String
+    Description: KMS Key ARN for Artifact S3 Bucket encryption from Cross Account
+
+Conditions:
+  isEnvProd: !Equals [!Ref Environment, "prod"]
+
+########################################################
+################ Resources #############################
+########################################################
+Resources:
+
+  Pipeline:
+      Type: AWS::CodePipeline::Pipeline
+      Properties:
+        Name: !Sub ${Environment}-${ProjectName}-pipeline
+        RoleArn: !Ref CodePipelineServiceRole
+        Stages:
+          - Name: Source
+            Actions:
+              - InputArtifacts: []
+                Name: Source
+                Namespace: SourceVariables
+                ActionTypeId:
+                  Category: Source
+                  Owner: AWS
+                  Version: 1
+                  Provider: CodeCommit
+                OutputArtifacts:
+                  - Name: SCCCheck
+                Configuration:
+                  BranchName: !Ref CodeCommitBranchName
+                  RepositoryName: !Ref CodeCommitRepositoryName
+                  PollForSourceChanges: false
+          - Name: Deploy
+            Actions:
+              - !If 
+                - isEnvProd
+                - Name: Deploy-Approval
+                  RunOrder: 1
+                  ActionTypeId:
+                    Category: Approval
+                    Owner: AWS
+                    Version: '1'
+                    Provider: Manual
+                - !Ref 'AWS::NoValue'
+              - Name: Deploy
+                RunOrder: 2
+                ActionTypeId:
+                  Category: Build
+                  Owner: AWS  
+                  Version: 1
+                  Provider: CodeBuild
+                InputArtifacts:
+                  - Name: SCCCheck 
+                OutputArtifacts:
+                  - Name: DeployOutput
+                Configuration:
+                  ProjectName: pennyworth-deploy
+                  EnvironmentVariables: !Sub '[{"name":"ENVIRONMENT","value":"${Environment}","type":"PLAINTEXT"},{"name":"BUCKET_NAME","value":"${BucketName}","type":"PLAINTEXT"},{"name":"JOB_SCRIPT_PATH","value":"${JobScriptPath}","type":"PLAINTEXT"},{"name":"JOB_LIBRARY_PATH","value":"s3://${Environment}-${BucketName}/${JobLibraryPath}","type":"PLAINTEXT"},{"name":"JOB_NAME","value":"${Environment}-${JobName}","type":"PLAINTEXT"},{"name":"JOB_ROLE_NAME","value":"${Environment}-${JobRoleName}","type":"PLAINTEXT"},{"name":"JOB_TEMP_PATH","value":"s3://${Environment}-${BucketName}/${JobScriptTempPath}","type":"PLAINTEXT"}]'
+                RoleArn:  !Sub  arn:aws:iam::${TargetAWSAccount}:role/BuildAcctCodePipelineCloudFormationRole
+        ArtifactStore:
+          EncryptionKey:
+            Id: !Ref S3KmsKeyId
+            Type: KMS
+          Location: !Ref CrossAccountS3BucketName
+          Type: S3
+        Tags:
+          - Key: Environment
+            Value: !Ref Environment
+
+  ServicePipelineTriggerRolePolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Sub ${CodeCommitBranchName}-${ProjectName}-trigger-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: codepipeline:StartPipelineExecution
+            Resource: 
+              - !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':', !Ref Pipeline ] ]  
+      Roles:
+        # - !Sub ${ProjectName}-cloudwatch-trigger-Role
+        - pennyworth-cloudwatch-trigger-Role
+
+
+  DEPLOYProdAmazonCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${CodeCommitBranchName}-${ProjectName}-trigger-event
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - 'CodeCommit Repository State Change'
+        resources:
+          - !Join [ '', [ 'arn:aws:codecommit:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':', !Ref CodeCommitRepositoryName  ] ]
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+            - "iam.amazonaws.com"
+          referenceType: 
+            - branch
+          referenceName:
+            - !Ref CodeCommitBranchName
+      Targets:
+        -
+          Arn: 
+            !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':', !Ref Pipeline ] ]
+          RoleArn: !Join ['',['arn:aws:iam::',!Ref 'AWS::AccountId',':role/pennyworth-cloudwatch-trigger-Role']]
+          Id: !Sub ${CodeCommitBranchName}-${ProjectName}-pipeline-trigger
+
+
+########################################################
+################ Outputs ###############################
+########################################################
+Outputs:
+  ServicePipeline:
+    Value: !Ref Pipeline

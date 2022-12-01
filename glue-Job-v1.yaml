@@ -1,0 +1,206 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "AWS Glue Job for Brane"
+Parameters:
+  Environment:
+    Type: String
+    Description: Which environmnet to deploy in
+  BucketName:
+    Type: String
+    Description: Bucket name where glue files are located
+    Default: pw-data-glue-jobs
+  ScriptLocation:
+    Description: S3 path till the script filename (excluding Bucket name)
+    Type: String
+  TempDirectory:
+    Description: S3 path till temporary directory (excluding Bucket name)
+    Type: String
+    Default: "Brane/scripts/temp"
+  PythonLibraryPath:
+    Description: S3 path till python package (excluding Bucket name)
+    Type: String
+
+Resources:
+  GlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${Environment}-Brane_Job"
+      GlueVersion: "3.0"
+      Command:
+        Name: pythonshell
+        PythonVersion: "3.9"
+        ScriptLocation: !Ref ScriptLocation
+      DefaultArguments: {
+        "--TempDir" : !Sub "s3://${Environment}-${BucketName}/${TempDirectory}",
+        "--extra-py-files" : !Ref PythonLibraryPath
+      }
+      ExecutionProperty:
+        MaxConcurrentRuns: 1000
+      MaxRetries: 1
+      Role: !Ref GlueRole
+
+  GlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Environment}-BraneJobRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - glue.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+    
+  GlueS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:*'
+              - 's3-object-lambda:*'
+            Resource: '*'
+      PolicyName: !Sub "${Environment}-S3Policy"
+      Roles: 
+        - !Ref GlueRole
+  
+  GlueEC2Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'ec2:Describe*'
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'elasticloadbalancing:Describe*'
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - "cloudwatch:ListMetrics"
+              - "cloudwatch:GetMetricStatistics"
+              - "cloudwatch:Describe*"
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'autoscaling:Describe*'
+            Resource: '*'
+      PolicyName: !Sub "${Environment}-EC2Policy"
+      Roles: 
+        - !Ref GlueRole
+  
+  CloudWatchlogsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action: cloudwatch:PutMetricData
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Resource:
+          - arn:aws:logs:*:*:/aws-glue/*
+          - arn:aws:logs:*:*:/customlogs/*
+      PolicyName: !Sub "${Environment}-CloudWatchPolicy"
+      Roles: 
+        - !Ref GlueRole
+
+  GlueServicePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - glue:*
+          - s3:GetBucketLocation
+          - s3:ListBucket
+          - s3:ListAllMyBuckets
+          - s3:GetBucketAcl
+          - ec2:DescribeRouteTables
+          - ec2:CreateNetworkInterface
+          - ec2:DeleteNetworkInterface
+          - ec2:DescribeNetworkInterfaces
+          - ec2:DescribeSecurityGroups
+          - ec2:DescribeSubnets
+          - ec2:DescribeVpcAttribute
+          - iam:ListRolePolicies
+          - iam:GetRole
+          - iam:GetRolePolicy
+          - cloudwatch:PutMetricData
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action:
+          - s3:CreateBucket
+          - s3:PutBucketPublicAccessBlock
+          Resource:
+          - arn:aws:s3:::aws-glue-*
+        - Effect: Allow
+          Action:
+          - s3:GetObject
+          - s3:PutObject
+          - s3:DeleteObject
+          Resource:
+          - arn:aws:s3:::aws-glue-*/*
+          - arn:aws:s3:::*/*aws-glue-*/*
+        - Effect: Allow
+          Action:
+          - s3:GetObject
+          Resource:
+          - arn:aws:s3:::crawler-public*
+          - arn:aws:s3:::aws-glue-*
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          - logs:AssociateKmsKey
+          Resource:
+          - arn:aws:logs:*:*:/aws-glue/*
+        - Effect: Allow
+          Action:
+          - ec2:CreateTags
+          - ec2:DeleteTags
+          Condition:
+            ForAllValues:StringEquals:
+              aws:TagKeys:
+              - aws-glue-service-resource
+          Resource:
+          - arn:aws:ec2:*:*:network-interface/*
+          - arn:aws:ec2:*:*:security-group/*
+          - arn:aws:ec2:*:*:instance/*
+      PolicyName: !Sub "${Environment}-GlueServicePolicy"
+      Roles: 
+        - !Ref GlueRole  
+
+  S3KMSPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - kms:DescribeKey
+          - kms:Encrypt
+          - kms:Decrypt
+          - kms:ReEncrypt*
+          - kms:GenerateDataKey*
+          Resource: arn:aws:kms:eu-west-2:896506119143:key/d4337236-78a6-4f2f-bfb8-ee15f1910194
+          Effect: Allow
+      PolicyName: !Sub "${Environment}-S3KMSPolicy"
+      Roles: 
+        - !Ref GlueRole
