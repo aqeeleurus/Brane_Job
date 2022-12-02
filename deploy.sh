@@ -1,5 +1,5 @@
 sed -i "s|.format()|.format(\"$CODEBUILD_RESOLVED_SOURCE_VERSION\")|" setup.py
-python3 setup.py bdist_wheel
+python3 brane_flows/setup.py bdist_wheel
 aws s3 cp *.whl s3://${ENVIRONMENT}-${BUCKET_NAME}/$JOB_LIBRARY_PATH/
 cd ..
 mv main.py main-$CODEBUILD_RESOLVED_SOURCE_VERSION.py
