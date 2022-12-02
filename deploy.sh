@@ -1,4 +1,4 @@
-sed -i "s|.format()|.format(\"$CODEBUILD_RESOLVED_SOURCE_VERSION\")|" setup.py
+sed -i "s|.format()|.format(\"$CODEBUILD_RESOLVED_SOURCE_VERSION\")|" brane_flows/setup.py
 python3 brane_flows/setup.py bdist_wheel
 aws s3 cp *.whl s3://${ENVIRONMENT}-${BUCKET_NAME}/$JOB_LIBRARY_PATH/
 cd ..
