@@ -199,7 +199,10 @@ Resources:
           - kms:Decrypt
           - kms:ReEncrypt*
           - kms:GenerateDataKey*
-          Resource: arn:aws:kms:eu-west-2:896506119143:key/d4337236-78a6-4f2f-bfb8-ee15f1910194
+          Resource:
+            Fn::ImportValue:
+              !Sub "${Environment}-pw-s3-arn"
+
           Effect: Allow
       PolicyName: !Sub "${Environment}-S3KMSPolicy"
       Roles: 
