@@ -7,7 +7,7 @@ Parameters:
   BucketName:
     Type: String
     Description: Bucket name where glue files are located
-    Default: pw-data-glue-jobs
+    Default: pw-data-glue-script
   ScriptLocation:
     Description: S3 path till the script filename (excluding Bucket name)
     Type: String
@@ -31,7 +31,11 @@ Resources:
         ScriptLocation: !Ref ScriptLocation
       DefaultArguments: {
         "--TempDir" : !Sub "s3://${Environment}-${BucketName}/${TempDirectory}",
-        "--extra-py-files" : !Ref PythonLibraryPath
+        "--extra-py-files" : !Ref PythonLibraryPath,
+        "--DATABASE_CONNECTION_NAME": dev-pw,
+        "--ENVIRONMENT": !Ref Environment,
+        "--LOOKUP_TABLES_BUCKET": !Sub "${Environment}-pw-client-data",
+        "--MONEYHUB_SILVER_BUCKET": !Sub "${Environment}-pw-client-data"
       }
       ExecutionProperty:
         MaxConcurrentRuns: 1000

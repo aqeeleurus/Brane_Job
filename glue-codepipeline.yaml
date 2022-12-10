@@ -17,7 +17,7 @@ Parameters:
   BucketName:
     Type: String
     Description: Bucket name (without environment) where glue files are located
-    Default: pw-data-glue-jobs
+    Default: pw-data-glue-script
 
   TargetAWSAccount:
     Description: AWS AccountNumber for target account
